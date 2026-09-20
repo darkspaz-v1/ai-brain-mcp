@@ -1,119 +1,63 @@
-# AI Brain Vault — MCP Server
+# ai-brain-mcp
 
-A local, **read-only** [Model Context Protocol](https://modelcontextprotocol.io) server
-over the Obsidian second-brain vault at `Desktop\AI Brain\AI Brain`, so any MCP client can
-answer *"what did I already decide about X?"* without hand-grepping the vault.
+Read-only MCP server over an Obsidian vault — ranked search, note reading, and full-text grep.
 
-Built in Python with the official MCP SDK (`FastMCP`). **No external API, no API keys,
-works offline.**
-
-## What this replaces
-
-The global `CLAUDE.md` instruction — *grep `vault-index.json` first, then read the matched
-note under `wiki/`, then fall back to a wider search* — is a workflow that had to be
-followed by hand every session. This server turns each of those three steps into a tool,
-so the convention is encoded rather than remembered:
-
-| Step | Tool |
-|------|------|
-| 1. Grep the flat manifest | `vault_search` |
-| 2. Read the matched note in full | `vault_get_note` |
-| 3. Fall back to full-text search | `vault_grep` |
-
-It also works where the `obsidian` MCP server doesn't: that one needs the Obsidian app
-running with its local REST plugin listening on a port (it currently fails with
-`ConnectionRefused`). This server reads the vault files straight off disk, so it works
-whether or not Obsidian is open.
+Built so an assistant can answer "have I solved this before?" against a personal knowledge vault
+instead of re-deriving the answer or searching the filesystem blindly.
 
 ## Tools
 
-| Tool | Purpose |
-|------|---------|
-| `vault_search` | Search the manifest by topic, tags, path, and summary |
-| `vault_get_note` | Read one note's full markdown |
-| `vault_grep` | Full-text search across note bodies (literal or regex) |
-| `vault_list_topics` | Enumerate topics with note counts |
+| Tool | Does |
+|---|---|
+| `vault_search` | Ranked search across notes, scored on title, tags and body |
+| `vault_get_note` | Full text of one note by path |
+| `vault_grep` | Literal or regex match across the vault, with file and line |
+| `vault_list_topics` | Topic folders and note counts, for orienting before searching |
 
-### Ranking
+## The design decision worth stating
 
-`vault_search` splits the query into terms and scores each note, weighted so a structural
-hit beats an incidental mention:
+**This server is read-only by construction, not by policy.** There is no write path in the code at
+all — no create, edit, append or delete tool exists to be called by mistake or talked into running.
+A knowledge vault is exactly the kind of store where a confused write is worse than no access, so the
+capability is simply absent rather than guarded.
 
-| Field | Weight |
-|-------|--------|
-| topic | 10 |
-| tags | 8 |
-| path | 5 |
-| summary | 3 |
+The search tool returns results that point at the next tool to call, so a client can go from a vague
+question to the right note without a second round trip.
 
-Results come back best-first. If the manifest misses — it holds one-line summaries, not
-full text — `vault_grep` searches the note bodies directly.
+## Notes
 
-## Why it's read-only
+- Regex input is validated, and a bad pattern returns an actionable error rather than a traceback.
+- Tests assert on structure and invariants rather than specific note contents, so they keep passing as
+  the vault grows.
 
-The vault has a specific update convention: frontmatter schema, the `_master-index.md`
-table of contents, and the `vault-index.json` manifest all have to move together (see
-`wiki/_master-index.md`). A write tool that got that only partly right would desync the
-index quietly, which is worse than having no write tool — you'd stop trusting search
-results without knowing why.
+**19 checks pass.**
 
-Notes stay authored the normal way: by hand, or by an agent following the documented
-convention. If you later want writes, the right shape is a single
-`vault_add_note` that updates the note, the master index, and the manifest in one atomic
-operation — not a bare file-write tool.
+## About MCP
 
-## Path safety
-
-`vault_get_note` resolves every path against the vault root and refuses anything that
-escapes it, so `../../../Windows/System32/...` returns an error rather than file contents.
-This server can only ever read inside the vault.
-
-## Setup
-
-Requires Python 3.10+ and the MCP SDK:
-
-```bash
-pip install "mcp[cli]"
-```
-
-## Register with Claude Code
-
-```bash
-claude mcp add ai-brain -- python "C:\Users\anshu\Desktop\Claude\ai-brain-mcp\server.py"
-```
-
-## Register with Claude Desktop
-
-Add to `%APPDATA%\Claude\claude_desktop_config.json`:
+[Model Context Protocol](https://modelcontextprotocol.io) is a standard for exposing tools to an LLM
+client. This server speaks MCP over stdio, so it is registered in the client config rather than run
+directly.
 
 ```json
 {
   "mcpServers": {
-    "ai-brain": {
-      "command": "python",
-      "args": ["C:\\Users\\anshu\\Desktop\\Claude\\ai-brain-mcp\\server.py"]
-    }
+    "ai-brain": { "command": "python", "args": ["C:/path/to/ai-brain-mcp/server.py"] }
   }
 }
 ```
 
-Restart Claude Desktop afterwards.
+**Register it twice if you use both Claude Code and Claude Desktop.** They read separate config files,
+and a server registered in one is invisible to the other — this cost real debugging time.
 
-## Test
+## Tests
 
-```bash
+```
 python test_server.py
 ```
 
-19 assertions covering manifest loading, ranking order, note reading, path-traversal
-refusal, grep (literal + regex), and error paths. The server is read-only, so the test
-runs against the real vault and cannot modify it.
+Drives every tool through the real handlers and prints one `PASS` line per check. No pytest — the
+suite is a single script so it runs anywhere with no dev dependencies.
 
-## Config
+## License
 
-Reads `C:\Users\anshu\Desktop\AI Brain\AI Brain` by default. Override with the
-`AI_BRAIN_VAULT` environment variable.
-
-## Tech
-
-Python · MCP Python SDK (FastMCP) · Pydantic v2 · asyncio
+MIT — see [LICENSE](LICENSE).
