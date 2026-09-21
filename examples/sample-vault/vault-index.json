@@ -1,0 +1,10 @@
+{
+  "notes": [
+    {"path": "wiki/homelab/nas-backups.md", "topic": "homelab", "tags": ["backup", "nas", "restic", "cron"], "summary": "Nightly restic backups of laptop and media server to the NAS, with retention and a monthly restore drill"},
+    {"path": "wiki/homelab/router-vlans.md", "topic": "homelab", "tags": ["network", "vlan", "router"], "summary": "Three-VLAN layout: trusted, IoT and servers, with the NAS on the servers VLAN"},
+    {"path": "wiki/cooking/sourdough-starter.md", "topic": "cooking", "tags": ["sourdough", "bread", "fermentation"], "summary": "Feeding schedule and readiness check for the sourdough starter"},
+    {"path": "wiki/cycling/commute-bike-setup.md", "topic": "cycling", "tags": ["bike", "commute", "maintenance"], "summary": "Tyre pressure, chain lube interval and brake checks for the commute bike"},
+    {"path": "wiki/python-tooling/ruff-and-ci.md", "topic": "python-tooling", "tags": ["python", "ruff", "ci", "github-actions"], "summary": "Ruff lint config and the GitHub Actions workflow that runs it before tests"},
+    {"path": "wiki/python-tooling/podcast-rss-pipeline.md", "topic": "python-tooling", "tags": ["python", "rss", "podcast", "automation"], "summary": "Morning script that downloads new podcast episodes and logs them weekly"}
+  ]
+}

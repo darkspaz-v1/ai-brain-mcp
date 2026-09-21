@@ -135,6 +135,34 @@ async def main() -> None:
         os.environ["AI_BRAIN_VAULT"] = _tmp
         importlib.reload(s)
 
+    # 9. The tool surface is exactly the four documented tools, all annotated read-only
+    tools = await s.mcp.list_tools()
+    ok(
+        sorted(t.name for t in tools)
+        == ["vault_get_note", "vault_grep", "vault_list_topics", "vault_search"],
+        "server exposes exactly the four documented tools",
+    )
+    ok(
+        all(t.annotations and t.annotations.readOnlyHint for t in tools),
+        "every tool is annotated read-only",
+    )
+
+    # 10. The bundled sample vault (used by the README demo) works end to end
+    sample = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "sample-vault")
+    os.environ["AI_BRAIN_VAULT"] = sample
+    try:
+        s3 = importlib.reload(s)
+        r = json.loads(await s3.vault_search(s3.SearchInput(query="backup nas", response_format=J)))
+        ok(
+            r["results"][0]["path"] == "wiki/homelab/nas-backups.md",
+            "sample vault: 'backup nas' ranks the backup note first",
+        )
+        note = await s3.vault_get_note(s3.GetNoteInput(path=r["results"][0]["path"]))
+        ok("restic" in note, "sample vault: top hit reads back")
+    finally:
+        os.environ["AI_BRAIN_VAULT"] = _tmp
+        importlib.reload(s)
+
     print("\nAll ai-brain tests passed.")
 
 
