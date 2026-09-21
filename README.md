@@ -1,15 +1,29 @@
 # ai-brain-mcp
 
+Give an AI assistant read-only search over your Obsidian vault, so it answers "have I solved this
+before?" from your own notes and cites the note it used.
+
 [![CI](https://github.com/darkspaz-v1/ai-brain-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/darkspaz-v1/ai-brain-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Read-only MCP server over an Obsidian vault — ranked search, note reading, and full-text grep.
+[Quick start](#quick-start) · [Tools](#tools) · [How it works](#how-it-works) · [Proof](#proof) · [Limitations](#limitations)
 
-Built so an assistant can answer "have I solved this before?" against a personal knowledge vault
-instead of re-deriving the answer or searching the filesystem blindly.
+![Terminal-style demo: a vague question, a ranked vault_search, vault_get_note reading the top note, and an answer citing it. Example session against a sample vault of invented notes.](docs/media/demo.png)
 
-## Install
+*Example session against a sample vault (invented notes in [`examples/sample-vault`](examples/sample-vault)).
+The tool output is real, captured by [`scripts/build_media.py`](scripts/build_media.py) running
+`server.py` over MCP; the final assistant reply is hand-written for illustration.*
 
-Requires Python 3.11 or newer (verified on 3.13).
+**Four tools, none of which can write.** `vault_search` (ranked), `vault_get_note` (read one note),
+`vault_grep` (full text), `vault_list_topics` (orient). The server has no create, edit, append or
+delete tool. That is by construction, not by policy: there is no write code path to call by mistake
+or be talked into running.
+
+## Quick start
+
+Requires Python 3.11 or newer (verified on 3.13) and an MCP client such as Claude Code or Claude
+Desktop. The vault needs a `vault-index.json` manifest and a `wiki/` folder (see
+[the sample](examples/sample-vault) for the shape).
 
 ```
 git clone https://github.com/darkspaz-v1/ai-brain-mcp.git
@@ -20,29 +34,52 @@ pip install -r requirements.txt
 python test_server.py
 ```
 
-`pip install .` also works and installs the same two dependencies (`mcp`, `pydantic`). The server is
-started by your MCP client, not by hand; see [Register it](#register-it) below.
+**Claude Code**, pointed at the bundled sample vault (swap in your own vault path when you are ready):
 
-For linting (`ruff check .`, as CI does), use `pip install -r requirements-dev.txt` instead.
+```
+claude mcp add ai-brain -e AI_BRAIN_VAULT=C:/path/to/ai-brain-mcp/examples/sample-vault -- C:/path/to/ai-brain-mcp/.venv/Scripts/python.exe C:/path/to/ai-brain-mcp/server.py
+```
 
-## Configuration
+**Claude Desktop**, in `%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ai-brain": {
+      "command": "C:/path/to/ai-brain-mcp/.venv/Scripts/python.exe",
+      "args": ["C:/path/to/ai-brain-mcp/server.py"],
+      "env": { "AI_BRAIN_VAULT": "C:/path/to/ai-brain-mcp/examples/sample-vault" }
+    }
+  }
+}
+```
+
+Use the Python from the environment where you ran `pip install`. Claude Code and Claude Desktop read
+separate config files, so register the server in each client you use.
 
 | Environment variable | Meaning | Default |
 |---|---|---|
-| `AI_BRAIN_VAULT` | Folder of your Obsidian vault (must contain `vault-index.json` and a `wiki/` folder). | `~/Desktop/AI Brain/AI Brain` |
+| `AI_BRAIN_VAULT` | Vault folder; must contain `vault-index.json` and a `wiki/` folder. | `~/Desktop/AI Brain/AI Brain` |
 
-Set the variable in your MCP client config (below); the default is only a convenience fallback.
+Then ask something like "have I set up nightly backups anywhere?" against the sample vault. The
+assistant should call `vault_search`, then `vault_get_note` on the best hit.
+
+`pip install .` also works (dependencies: `mcp`, `pydantic`). For linting as CI does, use
+`pip install -r requirements-dev.txt`.
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `vault_search` | Ranked search across notes, scored on title, tags and body |
-| `vault_get_note` | Full text of one note by path |
-| `vault_grep` | Literal or regex match across the vault, with file and line |
-| `vault_list_topics` | Topic folders and note counts, for orienting before searching |
+| `vault_search` | Ranked search over the manifest, scored on topic, tags, path and summary. Start here. |
+| `vault_get_note` | Full text of one note by the path `vault_search` returned. |
+| `vault_grep` | Literal or regex match across note bodies, with file and line. For when the manifest misses. |
+| `vault_list_topics` | Topic folders and note counts, for orienting before searching. |
 
-## Architecture
+All four are annotated `readOnlyHint: true`, and each takes `response_format` of `markdown` or `json`
+(`vault_get_note` returns the note text).
+
+## How it works
 
 ```mermaid
 flowchart LR
@@ -57,68 +94,43 @@ flowchart LR
     T4 --> Notes
 ```
 
-## The design decision worth stating
+The server encodes the vault's own lookup convention: grep the flat manifest first (each note has a
+topic, tags and a one-line summary, so the right file is usually found in one call), read the matching
+note next, and only then fall back to full-text search of the bodies.
 
-**This server is read-only by construction, not by policy.** There is no write path in the code at
-all — no create, edit, append or delete tool exists to be called by mistake or talked into running.
-A knowledge vault is exactly the kind of store where a confused write is worse than no access, so the
-capability is simply absent rather than guarded.
+**Why read-only.** A vault with a frontmatter schema, a table of contents and a manifest that must all
+move together is exactly the kind of store where a half-correct write corrupts the index quietly. So
+the capability is absent rather than guarded. Notes are still written the normal way, by hand or by an
+agent following the vault's convention.
 
-The search tool returns results that point at the next tool to call, so a client can go from a vague
-question to the right note without a second round trip.
+**Other choices.**
+- `vault_search` output ends by pointing at the next tool to call, so a client can go from a vague
+  question to the right note without a second round trip.
+- `vault_get_note` resolves paths against the vault root and refuses anything that escapes it
+  (for example `../` traversal); note output is capped at 60,000 characters.
+- A bad regex passed to `vault_grep` returns an actionable error rather than a traceback.
 
-## Notes
+## Proof
 
-- Regex input is validated, and a bad pattern returns an actionable error rather than a traceback.
-- Tests assert on structure and invariants rather than specific note contents.
+- `python test_server.py` runs 25 checks through the real tool handlers against a throwaway vault
+  built in a temp folder, so it needs no personal vault. Besides ranking, path safety and regex errors,
+  it asserts the server exposes exactly the four tools above and that every one is annotated read-only.
+- [CI](.github/workflows/ci.yml) runs `ruff check .` and the test script on Windows for Python 3.12 and 3.13.
+- The demo image is regenerated by [`scripts/build_media.py`](scripts/build_media.py) from a real
+  stdio session; the raw responses are saved in [`docs/media/demo-capture.txt`](docs/media/demo-capture.txt).
 
-**21 checks pass.**
+## Limitations
 
-## About MCP
+- It expects an index file (`vault-index.json`) and a `wiki/` folder; a plain Obsidian vault without
+  that manifest will search as empty until you build one.
+- Ranking is simple keyword scoring (topic 10, tag 8, path 5, summary 3 per term), not semantic search.
+  Space-separated terms are OR-ed and matched as substrings, so short or very common words add noise.
+- Tested on Windows; the code uses plain `os.path` and should run elsewhere, but that is unverified.
+- Tests use a synthetic vault; behaviour on very large vaults has not been measured.
 
-[Model Context Protocol](https://modelcontextprotocol.io) is a standard for exposing tools to an LLM
-client. This server speaks MCP over stdio, so it is registered in the client config rather than run
-directly.
+## Development and license
 
-### Register it
+Before changing code, run `python test_server.py` and `ruff check .`. To rebuild the README images:
+`pip install pillow`, then `python scripts/build_media.py`.
 
-Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ai-brain": {
-      "command": "python",
-      "args": ["C:/path/to/ai-brain-mcp/server.py"],
-      "env": { "AI_BRAIN_VAULT": "C:/path/to/your/vault" }
-    }
-  }
-}
-```
-
-Claude Code equivalent:
-
-```
-claude mcp add ai-brain -e AI_BRAIN_VAULT=C:/path/to/your/vault -- python C:/path/to/ai-brain-mcp/server.py
-```
-
-Use the Python from the environment where you ran `pip install -r requirements.txt` (for a venv, the full
-path to `.venv\Scripts\python.exe`) as `command`.
-
-**Register it twice if you use both Claude Code and Claude Desktop.** They read separate config files,
-and a server registered in one is invisible to the other — this cost real debugging time.
-
-## Tests
-
-```
-python test_server.py
-```
-
-Drives every tool through the real handlers and prints one `PASS` line per check.
-The suite builds a small throwaway vault in a temp folder, so it needs no personal vault and
-passes on any machine. No pytest — the
-suite is a single script so it runs anywhere with no dev dependencies.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Built on the [Model Context Protocol](https://modelcontextprotocol.io).
