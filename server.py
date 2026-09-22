@@ -2,9 +2,9 @@
 """
 AI Brain Vault MCP Server.
 
-A local, read-only MCP server over the Obsidian second-brain vault at
-C:\\Users\\anshu\\Desktop\\AI Brain\\AI Brain, so any MCP client can answer
-"what did I already decide/build/document about X" without hand-grepping.
+A local, read-only MCP server over an Obsidian second-brain vault (set
+AI_BRAIN_VAULT to its folder), so any MCP client can answer "what did I already decide/build/document about X" without
+hand-grepping.
 
 It encodes the vault's own documented lookup convention as tools:
 
@@ -32,6 +32,7 @@ Tools:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from enum import Enum
@@ -46,11 +47,13 @@ from mcp.server.fastmcp import FastMCP
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP("aibrain_mcp")
+log = logging.getLogger("aibrain_mcp")  # stdio transport: logs go to stderr, never stdout
 
-# Vault root. Override with AI_BRAIN_VAULT.
+# Vault root. Set AI_BRAIN_VAULT to your vault folder; the fallback is
+# <home>/Desktop/AI Brain/AI Brain (home = %USERPROFILE% on Windows).
 VAULT_ROOT = os.environ.get(
     "AI_BRAIN_VAULT",
-    r"C:\Users\anshu\Desktop\AI Brain\AI Brain",
+    os.path.join(os.path.expanduser("~"), "Desktop", "AI Brain", "AI Brain"),
 )
 INDEX_FILE = os.path.join(VAULT_ROOT, "vault-index.json")
 
@@ -77,7 +80,8 @@ def _load_index() -> List[Dict[str, Any]]:
     try:
         with open(INDEX_FILE, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("Could not read vault manifest %s: %s", INDEX_FILE, exc)
         return []
     notes = data.get("notes") if isinstance(data, dict) else data
     return notes if isinstance(notes, list) else []
@@ -414,7 +418,8 @@ async def vault_grep(params: GrepInput) -> str:
                         )
                         if len(matches) >= params.limit:
                             break
-        except OSError:
+        except OSError as exc:
+            log.warning("vault_grep skipped unreadable note %s: %s", rel, exc)
             continue
 
     if params.response_format == ResponseFormat.JSON:
